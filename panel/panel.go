@@ -14,10 +14,13 @@ type Panel struct {
 	Width  int
 	Height int
 
-	State [][]bool
+	State State
 
 	Port *serial.Port
 }
+
+type State [][]bool
+
 
 // NewPanel returns a new Panel with the given size, attached to the given port. The panel's Close() should be called when done.
 func NewPanel(w, h int, portName string, portBaud int) *Panel {
