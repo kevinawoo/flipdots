@@ -1,6 +1,8 @@
 package panel
 
 import (
+	"errors"
+	"fmt"
 	"image/color"
 	"log"
 
@@ -14,13 +16,21 @@ type Panel struct {
 	Width  int
 	Height int
 
-	State [][]bool
+	State State
 
-	Port *serial.Port
+	Port SerialPortI
 }
 
+type SerialPortI interface {
+	Write([]byte) (int, error)
+	Flush() error
+	Close() error
+}
+
+type State [][]bool
+
 // NewPanel returns a new Panel with the given size, attached to the given port. The panel's Close() should be called when done.
-func NewPanel(w, h int, portName string, portBaud int) *Panel {
+func NewPanel(w, h int, portName string, portBaud int) (*Panel, error) {
 	panel := &Panel{
 		Width:  w,
 		Height: h,
@@ -32,14 +42,16 @@ func NewPanel(w, h int, portName string, portBaud int) *Panel {
 
 	if portName == "" || portBaud == 0 {
 		log.Printf("Running in debug mode, with no panel connection")
-		return panel
+		return panel, nil
 	}
 	var err error
-	panel.Port, err = serial.OpenPort(&serial.Config{Name: portName, Baud: portBaud})
+	port, err := serial.OpenPort(&serial.Config{Name: portName, Baud: portBaud})
+	panel.Port = port
+
 	if err != nil {
-		log.Fatal(err)
+		return nil, errors.New(fmt.Sprintf("could not create new panel: %s", err))
 	}
-	return panel
+	return panel, nil
 }
 
 // Close the serial port
@@ -51,8 +63,8 @@ func (p *Panel) Close() {
 }
 
 // Send the state of the board to the associated flip dot panel and refresh
-func (p *Panel) Send() {
-	p.sendBoard(true)
+func (p *Panel) Send() (error) {
+	return p.sendBoard(true)
 }
 
 // Queue the state of the board to the panel, show when Refresh() is called (used for multiple panels)
@@ -60,7 +72,7 @@ func (p *Panel) Queue() {
 	p.sendBoard(false)
 }
 
-func (p *Panel) sendBoard(refresh bool) {
+func (p *Panel) sendBoard(refresh bool) (error) {
 	data := make([]byte, p.Width)
 	for x := 0; x < p.Width; x++ {
 		d := 0
@@ -69,7 +81,7 @@ func (p *Panel) sendBoard(refresh bool) {
 		}
 		data[x] = byte(d)
 	}
-	p.sendData(p.Address, data, refresh)
+	return p.sendData(p.Address, data, refresh)
 }
 
 // Refresh causes any queued state to be displayed
@@ -91,7 +103,7 @@ func (p *Panel) PrintState() {
 	}
 }
 
-func (p *Panel) sendData(address, data []byte, refresh bool) {
+func (p *Panel) sendData(address, data []byte, refresh bool) (error) {
 	if address == nil {
 		address = []byte{0xff}
 	}
@@ -135,7 +147,7 @@ func (p *Panel) sendData(address, data []byte, refresh bool) {
 		address = []byte{}
 	}
 	if command == 0 {
-		log.Fatalf("Unknown byte length %d", len(data))
+		return errors.New(fmt.Sprintf("Unknown byte length %d to send to board", len(data)))
 	}
 	message := append([]byte{0x80}, command)
 	message = append(message, address...)
@@ -145,16 +157,20 @@ func (p *Panel) sendData(address, data []byte, refresh bool) {
 	if p.Port == nil {
 		log.Printf("Message: %x", message)
 		p.PrintState()
-		return
+		return nil
 	}
 
 	n, err := p.Port.Write(message)
 	if err != nil {
-		log.Fatal(err)
+		return errors.New(fmt.Sprintf("couldn't write to port: %s", err))
 	}
-	if n != len(address)+len(data)+3 {
-		log.Fatalf("Didn't send all bytes, only %d", n)
+
+	expectedLength := len(address) + len(data) + 3
+	if n != expectedLength {
+		return errors.New(fmt.Sprintf("Didn't send all bytes to the board, expected %d bytes, got %d bytes", expectedLength, n))
 	}
+
+	return nil
 }
 
 // Get the state of the dot at the given coordinate as a boolean
@@ -198,4 +214,20 @@ func (p *Panel) Clear(state bool) {
 			p.Set(x, y, state)
 		}
 	}
+}
+
+func (state State) String() string {
+	line := ""
+	for _, row := range state {
+		for _, cell := range row {
+			if cell {
+				line += "⚫️"
+			} else {
+				line += "⚪️"
+			}
+		}
+		line += "\n"
+	}
+
+	return line
 }
