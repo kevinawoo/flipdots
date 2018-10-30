@@ -81,6 +81,9 @@ func (p *Panel) GetData(refresh bool) ([]byte, error){
 func (p *Panel) SendBulkData(data []byte) {
 	for _, x := range data {
 		fmt.Printf("0x%x ", x)
+		if x == 0x8f {
+			fmt.Print("\n")
+		}
 	}
 	fmt.Print("\n")
 	p.sendData(data)
@@ -132,7 +135,7 @@ func (p *Panel) getData(address []byte,refresh bool) ([]byte, error) {
 		data[x] = byte(d)
 	}
 
-	if p.Address == nil {
+	if address == nil {
 		address = []byte{0xff}
 	}
 	if data == nil {
