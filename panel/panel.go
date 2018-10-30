@@ -72,21 +72,40 @@ func (p *Panel) Queue() {
 	p.sendBoard(false)
 }
 
-func (p *Panel) sendBoard(refresh bool) (error) {
-	data := make([]byte, p.Width)
-	for x := 0; x < p.Width; x++ {
-		d := 0
-		for y := 0; y < p.Height; y++ {
-			d = d<<1 | int(p.GetInt(x, y))
-		}
-		data[x] = byte(d)
+// GetData
+func (p *Panel) GetData(refresh bool) ([]byte, error){
+	return p.getData(p.Address, refresh)
+}
+
+// SendBulkData
+func (p *Panel) SendBulkData(data []byte) {
+	for _, x := range data {
+		fmt.Printf("0x%x ", x)
 	}
-	return p.sendData(p.Address, data, refresh)
+	fmt.Print("\n")
+	p.sendData(data)
+}
+
+func (p *Panel) sendBoard(refresh bool) (error) {
+	data, err := p.getData(p.Address, refresh)
+	if err != nil {
+		return err
+	}
+	return p.sendData(data)
 }
 
 // Refresh causes any queued state to be displayed
-func (p *Panel) Refresh() {
-	p.sendData(nil, nil, true)
+func (p *Panel) Refresh() (error){
+	data, err  := p.getData(nil, true)
+	if err != nil{
+		return err
+	}
+	return p.sendData(data)
+}
+
+// Refresh causes any queued state to be displayed
+func (p *Panel) GetRefresh() ([]byte, error) {
+	return p.getData(p.Address, true)
 }
 
 func (p *Panel) PrintState() {
@@ -103,8 +122,17 @@ func (p *Panel) PrintState() {
 	}
 }
 
-func (p *Panel) sendData(address, data []byte, refresh bool) (error) {
-	if address == nil {
+func (p *Panel) getData(address []byte,refresh bool) ([]byte, error) {
+	data := make([]byte, p.Width)
+	for x := 0; x < p.Width; x++ {
+		d := 0
+		for y := 0; y < p.Height; y++ {
+			d = d<<1 | int(p.GetInt(x, y))
+		}
+		data[x] = byte(d)
+	}
+
+	if p.Address == nil {
 		address = []byte{0xff}
 	}
 	if data == nil {
@@ -147,25 +175,30 @@ func (p *Panel) sendData(address, data []byte, refresh bool) (error) {
 		address = []byte{}
 	}
 	if command == 0 {
-		return errors.New(fmt.Sprintf("Unknown byte length %d to send to board", len(data)))
+		return nil, errors.New(fmt.Sprintf("Unknown byte length %d to send to board", len(data)))
 	}
+
 	message := append([]byte{0x80}, command)
 	message = append(message, address...)
 	message = append(message, data...)
 	message = append(message, 0x8f)
 
+	return message, nil
+}
+
+func (p *Panel) sendData(data []byte) (error) {
 	if p.Port == nil {
-		log.Printf("Message: %x", message)
+		log.Printf("Message: %x", data)
 		p.PrintState()
 		return nil
 	}
 
-	n, err := p.Port.Write(message)
+	n, err := p.Port.Write(data)
 	if err != nil {
 		return errors.New(fmt.Sprintf("couldn't write to port: %s", err))
 	}
 
-	expectedLength := len(address) + len(data) + 3
+	expectedLength := len(p.Address) + len(data) + 3
 	if n != expectedLength {
 		return errors.New(fmt.Sprintf("Didn't send all bytes to the board, expected %d bytes, got %d bytes", expectedLength, n))
 	}
